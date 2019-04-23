@@ -73,7 +73,7 @@ def model_fn(mode, features, labels, params):
     if prediction_type == PredictionType.CLASSIFICATION:
         prediction_probs = tf.nn.softmax(network_output, name='softmax')
         prediction_labels = tf.argmax(network_output, axis=-1, name='label_preds')
-        predictions = {'probs': prediction_probs, 'labels': prediction_labels}
+        predictions = {'probs': prediction_probs}
     elif prediction_type == PredictionType.REGRESSION:
         predictions = {'output_values': network_output}
         prediction_labels = network_output
@@ -81,7 +81,7 @@ def model_fn(mode, features, labels, params):
         with tf.name_scope('prediction_ops'):
             prediction_probs = tf.nn.sigmoid(network_output, name='sigmoid')  # [B,H,W,C]
             prediction_labels = tf.cast(tf.greater_equal(prediction_probs, 0.5, name='labels'), tf.int32)  # [B,H,W,C]
-            predictions = {'probs': prediction_probs, 'labels': prediction_labels}
+            predictions = {'probs': prediction_probs}
     else:
         raise NotImplementedError
 
@@ -257,7 +257,6 @@ def model_fn(mode, features, labels, params):
             predictions['resized_shape'] = features['resized_shape']
 
         export_outputs['output'] = tf.estimator.export.PredictOutput(predictions)
-
         export_outputs[tf.saved_model.signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY] = export_outputs['output']
     else:
         export_outputs = None
