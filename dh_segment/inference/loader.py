@@ -4,6 +4,7 @@ from threading import Semaphore
 import numpy as np
 import tempfile
 from imageio import imsave, imread
+from typing import List
 
 _original_shape_key = 'original_shape'
 
@@ -14,8 +15,9 @@ class LoadedModel:
 
     :param model_base_dir: the model directory i.e. containing `saved_model.{pb|pbtxt}`. If not, it is assumed to \
     be a TF exporter directory, and the latest export directory will be automatically selected.
-    :param predict_mode: defines the input/output format of the prediction output (see `.predict()`)
-    :param num_parallel_predictions: limits the number of conccurent calls of `predict` to avoid Out-Of-Memory \
+    :param predict_mode: defines the input/output format of the prediction output
+    (see `.predict()`)
+    :param num_parallel_predictions: limits the number of concurrent calls of `predict` to avoid Out-Of-Memory \
     issues if predicting on GPU
     """
 
@@ -56,12 +58,14 @@ class LoadedModel:
                                                     "possible values: {}".format(input_dict_key, input_dict.keys())
         self._input_tensor = input_dict[input_dict_key]
         self._output_dict = output_dict
+
         if predict_mode == 'resized_images':
             # This node is not defined in this specific run-mode as there is no original image
             del self._output_dict['original_shape']
+
         self.sema = Semaphore(num_parallel_predictions)
 
-    def predict(self, input_tensor, prediction_key=None):
+    def predict(self, input_tensor, prediction_key: str=None):
         """
         Performs the prediction from the loaded model according to the prediction mode. \n
         Prediction modes:
@@ -167,6 +171,92 @@ class LoadedModel:
 
         result[_original_shape_key] = np.array([h, w], np.uint)
         return result
+
+
+class BatchLoadedModel:
+    """
+        Loads an exported dhSegment model (batch prediction)
+
+        :param model_base_dir: the model directory i.e. containing `saved_model.{pb|pbtxt}`. If not, it is assumed to \
+        be a TF exporter directory, and the latest export directory will be automatically selected.
+        :param predict_mode: defines the input/output format of the prediction output
+        (see `.batch_predict()`)
+        :param num_parallel_predictions: limits the number of concurrent calls of `predict` to avoid Out-Of-Memory \
+        issues if predicting on GPU
+        """
+
+    def __init__(self, model_base_dir, predict_mode='batch_filenames', num_parallel_predictions=2):
+        if os.path.exists(os.path.join(model_base_dir, 'saved_model.pbtxt')) or \
+                os.path.exists(os.path.join(model_base_dir, 'saved_model.pb')):
+            model_dir = model_base_dir
+        else:
+            possible_dirs = os.listdir(model_base_dir)
+            model_dir = os.path.join(model_base_dir, max(possible_dirs))  # Take latest export
+        print("Loading {}".format(model_dir))
+
+        if predict_mode == 'batch_filenames':
+            input_dict_key = 'filenames'
+            signature_def_key = 'serving_default'
+        else:
+            raise NotImplementedError
+        self.predict_mode = predict_mode
+
+        self.sess = tf.get_default_session()
+        loaded_model = tf.saved_model.loader.load(self.sess, ['serve'], model_dir)
+        assert 'serving_default' in list(loaded_model.signature_def)
+
+        input_dict, output_dict = _signature_def_to_tensors(loaded_model.signature_def[signature_def_key])
+        assert input_dict_key in input_dict.keys(), "{} not present in input_keys, " \
+                                                    "possible values: {}".format(input_dict_key, input_dict.keys())
+        self._input_tensor = input_dict[input_dict_key]
+        self._output_dict = output_dict
+
+        self._batch_size = input_dict['batch_size']
+
+        self.sema = Semaphore(num_parallel_predictions)
+
+    def init_prediction(self, input_filenames: List[str], batch_size: int=8):
+        """
+        Method to call to initialize the internal `Iterator` for `Dataset` handling. This method should be called
+        before any call to ``predict_next_batch`` (needs to be called only once).
+
+
+        :param input_filenames: list of filenames to predict
+        :param batch_size: size of batch
+        :return:
+        """
+
+        g = tf.get_default_graph()
+        _init_op = g.get_operation_by_name('dataset_init')
+
+        _ = self.sess.run(_init_op, feed_dict={self._input_tensor: input_filenames,
+                                               self._batch_size: batch_size})
+
+    def predict_next_batch(self, prediction_key: str=None):
+        """
+        Performs the prediction from the loaded model according to the prediction mode. \n
+        ``init_prediction`` must have been called before!
+        Prediction modes:
+
+        +-------------------+--------------------------+------------------------------------------------------+-------------------------------------------+
+        | `prediction_mode` | `input_tensor`           | Output prediction dictionnary                        | Comment                                   |
+        +===================+==========================+======================================================+===========================================+
+        | `batch_filenames` | List of filename strings | `labels`, `probs`, `original_shape`, `resized_shape` | Loads the image, resizes it, and predicts |
+        +-------------------+--------------------------+------------------------------------------------------+-------------------------------------------+
+
+        :param prediction_key: if not `None`, will returns the value of the corresponding key of the output dictionary \
+        instead of the full dictionary
+        :return: the prediction output
+        """
+        with self.sema:
+            if prediction_key:
+                desired_output = self._output_dict[prediction_key]
+            else:
+                desired_output = self._output_dict
+
+            predictions = self.sess.run(desired_output)
+
+            return predictions
 
 
 def _signature_def_to_tensors(signature_def):

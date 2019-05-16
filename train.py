@@ -6,9 +6,8 @@ from logging import WARNING  # import  DEBUG, INFO, ERROR for more/less verbosit
 tf.logging.set_verbosity(WARNING)
 from dh_segment import estimator_fn, utils
 from dh_segment.io import input
+from dh_segment.utils.exporter import BestExporterWithCheckpoints
 import json
-from glob import glob
-import numpy as np
 
 try:
     import better_exceptions
@@ -17,7 +16,6 @@ except ImportError:
     pass
 from tqdm import trange
 from sacred import Experiment
-import pandas as pd
 
 ex = Experiment('dhSegment_experiment')
 
@@ -32,6 +30,7 @@ def default_config():
     gpu = ''  # GPU to be used for training
     prediction_type = utils.PredictionType.CLASSIFICATION  # One of CLASSIFICATION, REGRESSION or MULTILABEL
     pretrained_model_name = 'resnet50'
+    saved_model_batch = False
     model_params = utils.ModelParams(pretrained_model_name=pretrained_model_name).to_dict()  # Model parameters
     training_params = utils.TrainingParams().to_dict()  # Training parameters
     if prediction_type == utils.PredictionType.CLASSIFICATION:
@@ -42,6 +41,7 @@ def default_config():
     elif prediction_type == utils.PredictionType.MULTILABEL:
         assert classes_file is not None
         model_params['n_classes'] = utils.get_n_classes_from_file_multilabel(classes_file)
+    saved_model_batch = False
 
 
 @ex.automain
@@ -92,9 +92,14 @@ def run(train_data, eval_data, model_output_dir, gpu, training_params, _config):
         eval_input, eval_labels_input = get_dirs_or_files(eval_data)
 
     # Configure exporter
-    serving_input_fn = input.serving_input_filename(training_params.input_resized_size)
+    if _config['saved_model_batch']:
+        serving_input_fn = input.serving_input_filename_batch(training_params.input_resized_size)
+    else:
+        serving_input_fn = input.serving_input_filename(training_params.input_resized_size)
+
     if eval_data is not None:
-        exporter = tf.estimator.BestExporter(serving_input_receiver_fn=serving_input_fn, exports_to_keep=2)
+        # exporter = tf.estimator.BestExporter(serving_input_receiver_fn=serving_input_fn, exports_to_keep=2)
+        exporter = BestExporterWithCheckpoints(serving_input_receiver_fn=serving_input_fn, exports_to_keep=2)
     else:
         exporter = tf.estimator.LatestExporter(name='SimpleExporter', serving_input_receiver_fn=serving_input_fn,
                                                exports_to_keep=5)

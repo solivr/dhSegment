@@ -73,12 +73,13 @@ def rotate_crop(image: tf.Tensor, rotation: float, crop: bool=True, minimum_shap
         return rotated_image
 
 
-def resize_image(image: tf.Tensor, size: int, interpolation: str='BILINEAR') -> tf.Tensor:
+def resize_image(image: tf.Tensor, size: int, interpolation: str='BILINEAR', return_output_shape=False) -> tf.Tensor:
     """Resizes the image
 
     :param image: image to be resized [H, W, C]
     :param size: size of the resized image (in pixels)
     :param interpolation: which interpolation to use, ``NEAREST`` or ``BILINEAR``
+    :param return_output_shape: if True will also return the shape of the resized image (H, W)
     :return: resized image
     """
     assert interpolation in ['BILINEAR', 'NEAREST']
@@ -96,7 +97,11 @@ def resize_image(image: tf.Tensor, size: int, interpolation: str='BILINEAR') -> 
             'NEAREST': tf.image.ResizeMethod.NEAREST_NEIGHBOR,
             'BILINEAR': tf.image.ResizeMethod.BILINEAR
         }
-        return tf.image.resize_images(image, new_shape, method=resize_method[interpolation])
+        resized_image = tf.image.resize_images(image, new_shape, method=resize_method[interpolation])
+        if return_output_shape:
+            return resized_image, new_shape
+        else:
+            return resized_image
 
 
 def load_and_resize_image(filename: str, channels: int, size: int=None, interpolation: str='BILINEAR') -> tf.Tensor:
@@ -106,12 +111,11 @@ def load_and_resize_image(filename: str, channels: int, size: int=None, interpol
     :param channels: number of channels for the decoded image
     :param size: number of desired pixels in the resized image, tf.Tensor or int (None for no resizing)
     :param interpolation:
-    :param return_original_shape: returns the original shape of the image before resizing if this flag is True
     :return: decoded and resized float32 tensor [h, w, channels],
     """
     with tf.name_scope('load_img'):
-        decoded_image = tf.to_float(tf.image.decode_jpeg(tf.read_file(filename), channels=channels,
-                                                         try_recover_truncated=True))
+        decoded_image = tf.cast(tf.image.decode_jpeg(tf.read_file(filename), channels=channels,
+                                                     try_recover_truncated=True), dtype=tf.float32)
         # TODO : if one side is smaller than size of patches (and make patches == true),
         # TODO : force the image to have at least patch size
         if size is not None and not(isinstance(size, int) and size <= 0):
