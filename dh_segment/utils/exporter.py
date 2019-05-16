@@ -33,11 +33,13 @@ class BestExporterWithCheckpoints(tf.estimator.BestExporter):
                 estimator, export_path, checkpoint_path, eval_result,
                 is_the_final_export)  # export_result has byte format
 
-            # copy the checkpoints files *.meta *.index, *.data* each time there is a better result,
+            # copy the checkpoints files *.meta *.index, *.data* and checkpoint each time there is a better result,
             export_checkpoint_dir = os.path.join(export_result.decode(), 'checkpoint-data')
             os.makedirs(export_checkpoint_dir)
             for name in glob(estimator.latest_checkpoint() + '.*'):
                 shutil.copy(name, os.path.join(export_checkpoint_dir, os.path.basename(name)))
+            shutil.copy(os.path.join(export_path, 'checkpoint'),
+                        os.path.join(export_checkpoint_dir, 'checkpoint'))
 
             self._garbage_collect_exports(export_path)
 
