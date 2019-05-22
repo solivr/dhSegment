@@ -38,7 +38,7 @@ class BestExporterWithCheckpoints(tf.estimator.BestExporter):
             os.makedirs(export_checkpoint_dir)
             for name in glob(estimator.latest_checkpoint() + '.*'):
                 shutil.copy(name, os.path.join(export_checkpoint_dir, os.path.basename(name)))
-            shutil.copy(os.path.join(export_path, 'checkpoint'),
+            shutil.copy(os.path.join(export_path, os.pardir, 'checkpoint'),
                         os.path.join(export_checkpoint_dir, 'checkpoint'))
 
             self._garbage_collect_exports(export_path)
